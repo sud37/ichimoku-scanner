@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e1320">
+<title>Ichimoku Scanner · NSE F&amp;O</title>
+<meta name="description" content="Weekly and monthly Ichimoku kumo + Chikou breakout scanner for NSE F&O stocks.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e1320'/%3E%3Cpath d='M5 22c5-9 9-2 13-8s6-6 9-6' fill='none' stroke='%2334d399' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#f4f6fa; --card:#ffffff; --ink:#111827; --muted:#667085; --line:#e4e7ee;
+  --accent:#0f9d6b; --accent-soft:#e3f6ee; --bad:#d6455d; --bad-soft:#fdecef;
+  --warn:#b7791f; --warn-soft:#fdf3dc; --chip:#eef1f6; --shadow:0 1px 2px rgba(16,24,40,.06);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0e1320; --card:#161d2e; --ink:#eef1f7; --muted:#93a0b8; --line:#26304a;
+    --accent:#34d399; --accent-soft:#12372e; --bad:#f8718a; --bad-soft:#3a1b25;
+    --warn:#f2c14e; --warn-soft:#3a2f14; --chip:#1f2840; --shadow:none;
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+.wrap{max-width:760px;margin:0 auto;padding:0 14px}
+header{padding:18px 0 10px}
+h1{font-size:20px;line-height:1.2;margin:0 0 4px;letter-spacing:-.01em}
+.sub{color:var(--muted);font-size:13px}
+.sub b{color:var(--ink);font-weight:600}
+.num{font-variant-numeric:tabular-nums}
+
+.sticky{position:sticky;top:0;z-index:5;background:var(--bg);padding:8px 0 10px;border-bottom:1px solid var(--line)}
+.tabs{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin:0 -14px;padding:0 14px}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex:0 0 auto;border:1px solid var(--line);background:var(--card);color:var(--ink);
+  border-radius:12px;padding:8px 12px;min-width:86px;text-align:left;font:inherit;cursor:pointer}
+.tab .k{display:block;font-size:20px;font-weight:700;line-height:1.1}
+.tab .l{display:block;font-size:12px;color:var(--muted);white-space:nowrap}
+.tab[aria-selected="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.tab[aria-selected="true"] .k{color:var(--accent)}
+.tools{display:flex;gap:8px;margin-top:10px}
+.tools input,.tools select{font:inherit;font-size:16px;color:var(--ink);background:var(--card);
+  border:1px solid var(--line);border-radius:10px;padding:9px 11px;min-width:0;height:42px}
+.tools input{flex:1}
+.tools select{flex:0 0 auto;max-width:46%}
+input:focus-visible,select:focus-visible,button:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.seg{display:flex;background:var(--chip);border-radius:11px;padding:3px;margin-top:12px}
+.seg button{flex:1;border:0;background:none;color:var(--muted);font:inherit;font-weight:650;padding:9px 0;border-radius:9px;cursor:pointer;min-height:40px}
+.seg button[aria-pressed="true"]{background:var(--card);color:var(--ink);box-shadow:var(--shadow)}
+.banner{margin-top:12px;padding:10px 12px;border-radius:10px;background:var(--warn-soft);color:var(--warn);font-size:13.5px;font-weight:600}
+.note{color:var(--muted);font-size:13px;margin:12px 2px 4px}
+.list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
+.card.sig{border-color:var(--accent)}
+.head{display:flex;align-items:center;gap:10px;width:100%;padding:12px 14px;background:none;border:0;
+  color:inherit;font:inherit;text-align:left;cursor:pointer;min-height:64px}
+.id{flex:1;min-width:0}
+.sym{font-weight:700;font-size:16px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.name{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.badge{font-size:11px;font-weight:700;border-radius:999px;padding:2px 8px;letter-spacing:.02em}
+.b-new{background:var(--accent);color:#04130d}
+.b-first{background:var(--warn-soft);color:var(--warn)}
+.b-on{background:var(--accent-soft);color:var(--accent)}
+.px{text-align:right;flex:0 0 auto}
+.px .p{font-weight:600}
+.px .c{font-size:12.5px}
+.up{color:var(--accent)} .dn{color:var(--bad)}
+.dots{display:flex;gap:3px;margin-top:6px;align-items:center}
+.dot{width:14px;height:5px;border-radius:3px;background:var(--line)}
+.dot.y{background:var(--accent)}
+.dots span.t{font-size:11.5px;color:var(--muted);margin-left:5px}
+.chev{flex:0 0 auto;color:var(--muted);transition:transform .15s}
+.card.open .chev{transform:rotate(180deg)}
+.body{display:none;padding:2px 14px 14px;border-top:1px solid var(--line)}
+.card.open .body{display:block}
+.checks{list-style:none;margin:10px 0 0;padding:0;display:grid;grid-template-columns:1fr;gap:7px}
+@media (min-width:560px){.checks{grid-template-columns:1fr 1fr;column-gap:18px}}
+.checks li{display:flex;gap:9px;align-items:flex-start;font-size:14px}
+.mark{flex:0 0 20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:800;margin-top:1px}
+.mark.y{background:var(--accent-soft);color:var(--accent)}
+.mark.n{background:var(--bad-soft);color:var(--bad)}
+.checks small{display:block;color:var(--muted);font-size:12px}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:14px}
+@media (min-width:560px){.stats{grid-template-columns:repeat(4,1fr)}}
+.stat{background:var(--chip);border-radius:10px;padding:8px 10px}
+.stat .l{font-size:11.5px;color:var(--muted)}
+.stat .v{font-weight:650;font-size:15px}
+.plan{margin-top:12px;padding:10px 12px;border-radius:10px;background:var(--accent-soft);font-size:13.5px}
+.plan b{color:var(--accent)}
+.links{margin-top:12px;font-size:14px}
+a{color:var(--accent);text-decoration:none;font-weight:600}
+.empty{text-align:center;color:var(--muted);padding:36px 16px;background:var(--card);border:1px dashed var(--line);border-radius:14px;margin-top:10px}
+
+.row{display:flex;align-items:center;gap:10px;padding:11px 14px}
+.row .when{font-size:12px;color:var(--muted)}
+.st{font-size:11px;font-weight:700;border-radius:999px;padding:2px 8px;background:var(--chip);color:var(--muted)}
+.st.bad{background:var(--bad-soft);color:var(--bad)}
+h2.wk{font-size:13px;color:var(--muted);font-weight:600;margin:16px 2px 0;text-transform:uppercase;letter-spacing:.05em}
+
+details.rules{margin-top:22px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:0 14px}
+details.rules summary{cursor:pointer;padding:13px 0;font-weight:650;list-style:none;display:flex;justify-content:space-between}
+details.rules summary::-webkit-details-marker{display:none}
+details.rules summary::after{content:"+";color:var(--muted);font-size:18px;line-height:1}
+details.rules[open] summary::after{content:"–"}
+.rules table{width:100%;border-collapse:collapse;font-size:13.5px;margin-bottom:12px}
+.rules td{padding:7px 0;border-top:1px solid var(--line);vertical-align:top}
+.rules td:first-child{color:var(--muted);width:34%;padding-right:10px}
+.rules p{font-size:13.5px;color:var(--muted);margin:0 0 12px}
+footer{color:var(--muted);font-size:12px;margin:18px 2px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Ichimoku Scanner</h1>
+    <div class="sub" id="meta">Loading scan…</div>
+    <div class="seg" role="group" aria-label="Timeframe">
+      <button type="button" id="tf-weekly" aria-pressed="true">Weekly</button>
+      <button type="button" id="tf-monthly" aria-pressed="false">Monthly</button>
+    </div>
+  </header>
+
+  <div class="sticky">
+    <div class="tabs" role="tablist" id="tabs"></div>
+    <div class="tools" id="tools">
+      <input id="q" type="search" placeholder="Search symbol or name" autocomplete="off" aria-label="Search stocks">
+      <select id="sort" aria-label="Sort by">
+        <option value="pass">Most conditions</option>
+        <option value="chg">Week change</option>
+        <option value="brk">Breakout size</option>
+        <option value="volx">Volume surge</option>
+        <option value="s">A → Z</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="banner" id="banner" hidden></div>
+  <div class="note" id="note"></div>
+  <div class="list" id="list"></div>
+
+  <details class="rules">
+    <summary>How the scan works</summary>
+    <p id="rulesIntro"></p>
+    <table id="rulesTable"></table>
+    <table id="exitTable"></table>
+  </details>
+
+  <footer>
+    Prices from Yahoo Finance, split-adjusted, completed weeks and months only. Refreshed automatically after market close.
+    For research and education only. Not investment advice.
+  </footer>
+</div>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const inr = n => n == null ? "–" : "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: n >= 1000 ? 0 : 2 });
+const pct = n => n == null ? "–" : (n > 0 ? "+" : "") + n.toFixed(1) + "%";
+const fmtDate = s => new Date(s + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+
+let ALL = null, D = null, tf = "weekly", tab = "new";
+const CFG = {
+  weekly: {
+    unit: "wk", period: "Week ending", next: "next week's open", interval: "W", recent: "Past 8 weeks", hold: "52 weeks", bar: "week",
+    histNote: "Not enough monthly history to evaluate (needs about 9 years)",
+    intro: "Weekly Ichimoku (Tenkan 9 / Kijun 26 / Senkou B 52 / displacement 26) on NSE F&O stocks. A stock is a new signal on the week all nine conditions become true together. The plan is to buy at the next week's open.",
+    exits: [
+      ["Initial stop", "3.2 × weekly ATR below the signal close, moved down to the cloud bottom if that is lower, never more than 5 ATR away."],
+      ["Trail", "After +1 ATR of profit, 5 ATR chandelier from the highest high."],
+      ["Invalidation", "Weekly close below the cloud bottom."],
+      ["Time stop", "Exit on the close of week 52."],
+      ["\"First\" tag", "First signal since price and Chikou cleared the cloud. Later signals in the same run are repeat triggers."],
+    ],
+  },
+  monthly: {
+    unit: "mo", period: "Month ending", next: "next month's first open", interval: "M", recent: "Past 12 months", hold: "24 months", bar: "month",
+    histNote: "Needs about 9 years of price history before the monthly cloud and Chikou can be evaluated",
+    intro: "Monthly Ichimoku (Tenkan 9 / Kijun 26 / Senkou B 52 / displacement 26) on NSE F&O stocks. A stock is a new signal on the month all ten conditions become true for the first time since price and Chikou cleared the cloud. The plan is to buy at the next month's first open, in up to 8 equal slots with at most 2 per sector.",
+    exits: [
+      ["Initial stop", "2.5 × monthly ATR below the signal close, moved down to the cloud bottom if that is lower, never more than 3.5 ATR away. Checked on weekly closes."],
+      ["Trail", "After +1.5 ATR of profit, 4 ATR chandelier from the highest monthly high."],
+      ["Invalidation", "Monthly close below the cloud bottom."],
+      ["Time stop", "Exit on the close of month 24."],
+      ["Backtest", "2008 to Nov 2026 on today's F&O list: 18.7% a year, worst drawdown 37%. The list is survivorship-biased, so treat the return as flattered."],
+    ],
+  },
+};
+const N = () => D.conditions.length;
+const TABS = [
+  { id: "new", label: "New signals", f: s => s.signal, note: () => "All " + N() + " conditions became true this " + CFG[tf].bar + ". Plan: buy at " + CFG[tf].next + "." },
+  { id: "on", label: "Setup active", f: s => s.setup && !s.signal, note: () => "All " + N() + " conditions still true, but the signal fired in an earlier " + CFG[tf].bar + "." },
+  { id: "near", label: "One short", f: s => s.pass === N() - 1, note: () => (N() - 1) + " of " + N() + " conditions true. These can trigger next " + CFG[tf].bar + "." },
+  { id: "all", label: "All stocks", f: () => true, note: () => "Every stock in the universe, with its checklist." },
+  { id: "recent", note: () => "Signals from earlier " + CFG[tf].bar + "s and how they have moved since the signal close." },
+];
+
+function renderTabs() {
+  const box = $("#tabs"); box.textContent = "";
+  for (const t of TABS) {
+    const n = t.id === "recent" ? D.recent.length : D.stocks.filter(t.f).length;
+    const b = el("button", "tab"); b.type = "button"; b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", String(t.id === tab));
+    b.append(el("span", "k num", String(n)), el("span", "l", t.label || CFG[tf].recent));
+    b.onclick = () => { tab = t.id; renderTabs(); render(); window.scrollTo({ top: 0 }); };
+    box.append(b);
+  }
+}
+
+function stockCard(s) {
+  const card = el("div", "card" + (s.signal ? " sig" : ""));
+  const head = el("button", "head"); head.type = "button"; head.setAttribute("aria-expanded", "false");
+  const id = el("div", "id");
+  const sym = el("div", "sym"); sym.append(el("span", null, s.s));
+  if (s.signal) sym.append(el("span", "badge b-new", "NEW"));
+  if (s.signal && s.first) sym.append(el("span", "badge b-first", "FIRST"));
+  if (s.setup && !s.signal) sym.append(el("span", "badge b-on", "ACTIVE"));
+  const dots = el("div", "dots");
+  for (const c of D.conditions) dots.append(el("i", "dot" + (s.c[c.k] ? " y" : "")));
+  dots.append(el("span", "t num", s.pass + "/" + N()));
+  id.append(sym, el("div", "name", s.n), dots);
+  const px = el("div", "px num");
+  px.append(el("div", "p", inr(s.close)), el("div", "c " + (s.chg >= 0 ? "up" : "dn"), pct(s.chg)));
+  const chev = el("span", "chev", "▾"); chev.setAttribute("aria-hidden", "true");
+  head.append(id, px, chev);
+  const body = el("div", "body");
+  head.onclick = () => {
+    const open = card.classList.toggle("open");
+    head.setAttribute("aria-expanded", String(open));
+    if (open && !body.childElementCount) fillBody(body, s);
+  };
+  card.append(head, body);
+  return card;
+}
+
+function fillBody(body, s) {
+  const ul = el("ul", "checks");
+  for (const c of D.conditions) {
+    const ok = s.c[c.k], li = el("li");
+    const m = el("span", "mark " + (ok ? "y" : "n"), ok ? "✓" : "✕");
+    m.setAttribute("aria-label", ok ? "Pass" : "Fail");
+    const t = el("div"); t.append(el("span", null, c.label));
+    let d = c.desc;
+    if (!s.hist && (c.k === "htf" || (tf === "monthly" && (c.k === "price" || c.k === "chikou")))) d = CFG[tf].histNote;
+    t.append(el("small", null, d));
+    li.append(m, t); ul.append(li);
+  }
+  const stats = el("div", "stats");
+  const stat = (l, v) => { const b = el("div", "stat"); b.append(el("div", "l", l), el("div", "v num", v)); stats.append(b); };
+  stat("Cloud thickness", s.thick == null ? "–" : s.thick.toFixed(2) + " ATR");
+  stat("Bullish cloud age", s.age + " " + CFG[tf].unit);
+  stat("Close vs cloud top", s.brk == null ? "–" : (s.brk > 0 ? "+" : "") + s.brk.toFixed(2) + " ATR");
+  stat(tf === "weekly" ? "Volume vs 20-wk avg" : "Volume vs 12-mo avg", s.volx == null ? "–" : s.volx.toFixed(2) + "×");
+  stat(tf === "weekly" ? "Weekly ATR" : "Monthly ATR", inr(s.atr));
+  stat("Cloud top", inr(s.top));
+  stat("Cloud bottom", inr(s.bot));
+  stat("Indicative stop", s.stop == null ? "–" : inr(s.stop) + " (" + pct(s.stopPct) + ")");
+  body.append(ul, stats);
+  if (s.setup) {
+    const p = el("div", "plan");
+    p.append(el("b", null, s.signal ? "Plan: " : "Setup active: "),
+      document.createTextNode(s.signal
+        ? "buy at " + CFG[tf].next + ". Initial stop near " + inr(s.stop) + " (" + pct(s.stopPct) + " from the signal close). Hold up to " + CFG[tf].hold + " unless the " + CFG[tf].bar + " closes below the cloud bottom."
+        : "signal fired earlier; not a fresh entry this " + CFG[tf].bar + " under the rules."));
+    body.append(p);
+  }
+  const links = el("div", "links"), a = el("a", null, "Open " + tf + " chart on TradingView ↗");
+  a.href = "https://www.tradingview.com/chart/?symbol=NSE%3A" + encodeURIComponent(s.s.replace(/[&-]/g, "_")) + "&interval=" + CFG[tf].interval;
+  a.target = "_blank"; a.rel = "noopener";
+  links.append(a); body.append(links);
+}
+
+function renderRecent(list) {
+  let wk = null;
+  for (const r of D.recent) {
+    if (r.date !== wk) { wk = r.date; list.append(el("h2", "wk", CFG[tf].period + " " + fmtDate(wk))); }
+    const card = el("div", "card"), row = el("div", "row");
+    const id = el("div", "id"), sym = el("div", "sym");
+    sym.append(el("span", null, r.s));
+    if (r.first) sym.append(el("span", "badge b-first", "FIRST"));
+    sym.append(el("span", "st" + (r.status === "Open" ? "" : " bad"), r.status));
+    id.append(sym, el("div", "name", r.n),
+      el("div", "when num", "Signal close " + inr(r.sigClose) + " · stop " + inr(r.stop) + " · " + r.ago + " " + CFG[tf].unit + " ago"));
+    const px = el("div", "px num");
+    px.append(el("div", "p", inr(r.last)), el("div", "c " + (r.ret >= 0 ? "up" : "dn"), pct(r.ret)));
+    row.append(id, px); card.append(row); list.append(card);
+  }
+  if (!D.recent.length) list.append(el("div", "empty", "No signals in the " + CFG[tf].recent.toLowerCase() + "."));
+}
+
+function render() {
+  const t = TABS.find(x => x.id === tab), list = $("#list");
+  list.textContent = ""; $("#note").textContent = t.note();
+  $("#tools").style.display = tab === "recent" ? "none" : "flex";
+  if (tab === "recent") return renderRecent(list);
+  const q = $("#q").value.trim().toLowerCase(), key = $("#sort").value;
+  let rows = D.stocks.filter(t.f);
+  if (q) rows = rows.filter(s => s.s.toLowerCase().includes(q) || s.n.toLowerCase().includes(q));
+  rows.sort(key === "s" ? (a, b) => a.s.localeCompare(b.s)
+    : (a, b) => (b[key] ?? -1e9) - (a[key] ?? -1e9) || a.s.localeCompare(b.s));
+  if (!rows.length) {
+    list.append(el("div", "empty", q ? "No stocks match “" + q + "”."
+      : tab === "new" ? "No new signals this " + CFG[tf].bar + ". Check “One short” for names that are close."
+      : "Nothing here this " + CFG[tf].bar + "."));
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  for (const s of rows) frag.append(stockCard(s));
+  list.append(frag);
+}
+
+function setTf(next) {
+  if (!ALL[next]) return;
+  tf = next; D = ALL[tf];
+  for (const k of ["weekly", "monthly"]) $("#tf-" + k).setAttribute("aria-pressed", String(k === tf));
+  const meta = $("#meta"); meta.textContent = "";
+  meta.append(CFG[tf].period + " ", el("b", null, fmtDate(D.periodEnding)), " · " + D.universe + " NSE F&O stocks · updated " + ALL.generated);
+  const banner = $("#banner");
+  banner.hidden = !(tf === "monthly" && D.marketOk === false);
+  banner.textContent = "Market gate is off: Nifty 500 closed the month below its 10-month average, so no monthly entries are allowed.";
+  $("#rulesIntro").textContent = CFG[tf].intro;
+  const fill = (id, rows) => { const t = $(id); t.textContent = ""; for (const [a, b] of rows) { const tr = el("tr"); tr.append(el("td", null, a), el("td", null, b)); t.append(tr); } };
+  fill("#rulesTable", D.conditions.map(c => [c.label, c.desc]));
+  fill("#exitTable", CFG[tf].exits);
+  tab = D.stocks.some(s => s.signal) ? "new" : D.stocks.some(s => s.pass === N() - 1) ? "near" : "all";
+  try { localStorage.setItem("tf", tf); } catch (e) {}
+  renderTabs(); render();
+}
+
+async function init() {
+  try {
+    const r = await fetch("data/scan.json?t=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    ALL = await r.json();
+  } catch (e) {
+    $("#meta").textContent = "Could not load scan data. Pull down to refresh, or try again in a minute.";
+    return;
+  }
+  if (!ALL.monthly) $("#tf-monthly").disabled = true;
+  let saved = "weekly";
+  try { saved = localStorage.getItem("tf") || "weekly"; } catch (e) {}
+  setTf(ALL[saved] ? saved : "weekly");
+  $("#tf-weekly").onclick = () => setTf("weekly");
+  $("#tf-monthly").onclick = () => setTf("monthly");
+  $("#q").addEventListener("input", render);
+  $("#sort").addEventListener("change", render);
+}
+init();
+</script>
+</body>
+</html>
