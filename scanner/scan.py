@@ -200,6 +200,7 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
     """Repair Yahoo artefacts: one-day moves beyond -45% / +100% that are bad ticks
     (price snaps back within 5 sessions) or unadjusted corporate actions (level shift)."""
     df = df.dropna(subset=["Close"]).copy()
+    df["Volume"] = df["Volume"].astype(float)  # back-adjusting scales volume; pandas 3 rejects float into int
     px = ["Open", "High", "Low", "Close"]
     for _ in range(6):
         r = df.Close.pct_change()
