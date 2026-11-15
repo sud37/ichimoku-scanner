@@ -5,6 +5,11 @@ on:
     - cron: "30 11 * * 1-5"   # 17:00 IST on weekdays, after the NSE close
     - cron: "30 3 * * 6"      # Saturday morning IST, safety re-run
   workflow_dispatch:
+  push:                       # re-run when the scanner itself changes (data commits don't match)
+    paths:
+      - "scanner/**"
+      - "requirements.txt"
+      - ".github/workflows/scan.yml"
 
 permissions:
   contents: write
