@@ -65,20 +65,37 @@ M_CONDITIONS = [
 ]
 M_KEYS = [c[0] for c in M_CONDITIONS]
 
+# Daily version (grid-searched on 2008-2017, checked on 2018-2026): doubled geometry, every setup flip
+D_TENKAN, D_KIJUN, D_SENKOU_B, D_DISP = 18, 52, 104, 52
+D_BULL_MIN, D_VOL_N, D_MKT_N, D_SL_ATR = 3, 20, 200, 3.0
+RECENT_DAYS = 10
+D_CONDITIONS = [
+    ("price", "Price above cloud", "Daily close is above the top of the cloud"),
+    ("chikou", "Chikou above cloud", "Close is above the cloud as it stood 52 sessions ago"),
+    ("bull3", "Cloud bullish 3+ days", "Span A above Span B for at least 3 sessions"),
+    ("future", "Future cloud bullish", "Undisplaced Span A is above Span B"),
+    ("tk", "Tenkan above Kijun", "Trend alignment (18 / 52)"),
+    ("ckpx", "Chikou above price", "Close is above the close 52 sessions ago"),
+    ("thick", "Cloud thickness", "Cloud height is at least 0.20 daily ATR"),
+    ("vol", "Volume", "Day's volume is at least the 20-day average"),
+    ("mkt", "Market gate", "Nifty 500 is above its 200-day average"),
+]
+D_KEYS = [c[0] for c in D_CONDITIONS]
+
 
 def _mid(high: pd.Series, low: pd.Series, n: int) -> pd.Series:
     return (high.rolling(n).max() + low.rolling(n).min()) / 2
 
 
-def ichimoku(df: pd.DataFrame) -> pd.DataFrame:
+def ichimoku(df: pd.DataFrame, tenkan: int = TENKAN, kijun: int = KIJUN, senkou_b: int = SENKOU_B, disp: int = DISP) -> pd.DataFrame:
     """Cloud columns are aligned to the bar they are plotted on."""
     out = pd.DataFrame(index=df.index)
-    out["tenkan"] = _mid(df.High, df.Low, TENKAN)
-    out["kijun"] = _mid(df.High, df.Low, KIJUN)
+    out["tenkan"] = _mid(df.High, df.Low, tenkan)
+    out["kijun"] = _mid(df.High, df.Low, kijun)
     out["a_raw"] = (out.tenkan + out.kijun) / 2
-    out["b_raw"] = _mid(df.High, df.Low, SENKOU_B)
-    out["a"] = out.a_raw.shift(DISP)
-    out["b"] = out.b_raw.shift(DISP)
+    out["b_raw"] = _mid(df.High, df.Low, senkou_b)
+    out["a"] = out.a_raw.shift(disp)
+    out["b"] = out.b_raw.shift(disp)
     out["top"] = out[["a", "b"]].max(axis=1, skipna=False)
     out["bot"] = out[["a", "b"]].min(axis=1, skipna=False)
     return out
@@ -196,6 +213,57 @@ def evaluate_monthly(daily: pd.DataFrame, mkt_ok: pd.Series, asof: pd.Timestamp)
     return t
 
 
+def evaluate_daily(daily: pd.DataFrame, mkt_ok: pd.Series, asof: pd.Timestamp) -> pd.DataFrame | None:
+    """Per-day condition table for one stock, using sessions on/before asof.
+
+    A signal is any day the eight stock conditions flip on together while the
+    market gate is on (the gate filters signals; it does not create them)."""
+    d = daily.dropna(subset=["Close"])
+    d = d[d.index <= asof]
+    if len(d) < 60:
+        return None
+    ik = ichimoku(d, D_TENKAN, D_KIJUN, D_SENKOU_B, D_DISP)
+    t = pd.DataFrame(index=d.index)
+    t["close"] = d.Close
+    t["atr"] = atr(d)
+    t["top"], t["bot"] = ik.top, ik.bot
+
+    dual = (d.Close > ik.top) & (d.Close > ik.top.shift(D_DISP))
+    bull = ik.a > ik.b
+    run = bull.groupby((~bull).cumsum()).cumsum()
+    t["price"] = d.Close > ik.top
+    t["chikou"] = d.Close > ik.top.shift(D_DISP)
+    t["bull3"] = run >= D_BULL_MIN
+    t["future"] = ik.a_raw > ik.b_raw
+    t["tk"] = ik.tenkan > ik.kijun
+    t["ckpx"] = d.Close > d.Close.shift(D_DISP)
+    t["thickness"] = (ik.top - ik.bot) / t.atr
+    t["thick"] = t.thickness >= THICK_MIN
+    t["vol_ratio"] = d.Volume / d.Volume.rolling(D_VOL_N).mean()
+    t["vol"] = t.vol_ratio >= 1.0
+    t["age"] = run
+    t["brk"] = (d.Close - ik.top) / t.atr
+    t["mkt"] = mkt_ok.astype(float).reindex(d.index, method="ffill").fillna(0).astype(bool)
+    t["hist"] = ik.top.shift(D_DISP).notna() & t.atr.notna()
+
+    stock_ok = t[[k for k in D_KEYS if k != "mkt"]].all(axis=1)
+    flip = stock_ok & ~stock_ok.shift(1, fill_value=False)
+    seen = stock_ok.astype(int).groupby((~dual).cumsum()).cumsum()
+    t["dual"] = dual
+    t["setup"] = stock_ok & t.mkt
+    t["signal"] = flip & t.mkt
+    t["first"] = t.signal & (seen == 1)
+    t["stop"] = t.close - D_SL_ATR * t.atr
+    return t
+
+
+def last_completed_session(now: datetime | None = None) -> pd.Timestamp:
+    """Today once the NSE has closed, otherwise yesterday (so a partial bar is never scanned)."""
+    now = now or datetime.now(IST)
+    d = pd.Timestamp(now.date())
+    return d if now.hour >= 16 else d - pd.Timedelta(days=1)
+
+
 def clean(df: pd.DataFrame) -> pd.DataFrame:
     """Repair Yahoo artefacts: one-day moves beyond -45% / +100% that are bad ticks
     (price snaps back within 5 sessions) or unadjusted corporate actions (level shift)."""
@@ -304,7 +372,8 @@ def r2(x):
 
 def build(tables: dict[str, pd.DataFrame], names: dict[str, str], asof: pd.Timestamp, tf: str) -> dict:
     """Turn per-stock condition tables into the JSON block for one timeframe."""
-    conds_def, keys, n_recent = (CONDITIONS, KEYS, RECENT_WEEKS) if tf == "weekly" else (M_CONDITIONS, M_KEYS, RECENT_MONTHS)
+    conds_def, keys, n_recent = {"weekly": (CONDITIONS, KEYS, RECENT_WEEKS), "monthly": (M_CONDITIONS, M_KEYS, RECENT_MONTHS),
+                                 "daily": (D_CONDITIONS, D_KEYS, RECENT_DAYS)}[tf]
     stocks, recent = [], []
     for sym, t in sorted(tables.items()):
         if t is None or len(t) < 2:
@@ -359,22 +428,30 @@ def main() -> int:
     wk = last_completed_friday()
     out["weekly"] = build({s: evaluate(df, wk) for s, df in prices.items()}, names, wk, "weekly")
 
-    mo = last_completed_month()
+    mo, day = last_completed_month(), last_completed_session()
     index_close = fetch_market()
     if index_close is not None:
         ok = market_ok(index_close, mo)
         out["monthly"] = build({s: evaluate_monthly(df, ok, mo) for s, df in prices.items()}, names, mo, "monthly")
         out["monthly"]["marketOk"] = bool(ok.iloc[-1])
-    else:  # keep the previous monthly block rather than publish a scan without the market gate
-        print("Nifty 500 unavailable; monthly scan not refreshed", file=sys.stderr)
+        ic = index_close[index_close.index <= day]
+        dok = ic > ic.rolling(D_MKT_N).mean()
+        tables = {s: evaluate_daily(df, dok, day) for s, df in prices.items()}
+        last = max(t.index[-1] for t in tables.values() if t is not None)  # latest session actually traded
+        tables = {s: (t if t is not None and t.index[-1] == last else None) for s, t in tables.items()}
+        out["daily"] = build(tables, names, last, "daily")
+        out["daily"]["marketOk"] = bool(dok.iloc[-1])
+    else:  # keep the previous blocks rather than publish scans without the market gate
+        print("Nifty 500 unavailable; monthly and daily scans not refreshed", file=sys.stderr)
         try:
-            out["monthly"] = json.loads(path.read_text())["monthly"]
+            old = json.loads(path.read_text())
         except Exception:  # noqa: BLE001
-            out["monthly"] = None
+            old = {}
+        out["monthly"], out["daily"] = old.get("monthly"), old.get("daily")
 
     path.parent.mkdir(exist_ok=True)
     path.write_text(json.dumps(out, separators=(",", ":")))
-    for tf in ("weekly", "monthly"):
+    for tf in ("daily", "weekly", "monthly"):
         b = out[tf]
         if b:
             print(f"{tf} to {b['periodEnding']}: {b['universe']} stocks, signals: {[s['s'] for s in b['stocks'] if s['signal']] or 'none'}")

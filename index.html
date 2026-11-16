@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0e1320">
 <title>Ichimoku Scanner · NSE F&amp;O</title>
-<meta name="description" content="Weekly and monthly Ichimoku kumo + Chikou breakout scanner for NSE F&O stocks.">
+<meta name="description" content="Daily, weekly and monthly Ichimoku kumo + Chikou breakout scanner for NSE F&O stocks.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e1320'/%3E%3Cpath d='M5 22c5-9 9-2 13-8s6-6 9-6' fill='none' stroke='%2334d399' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
 <style>
 :root{
@@ -119,6 +119,7 @@ footer{color:var(--muted);font-size:12px;margin:18px 2px 0}
     <h1>Ichimoku Scanner</h1>
     <div class="sub" id="meta">Loading scan…</div>
     <div class="seg" role="group" aria-label="Timeframe">
+      <button type="button" id="tf-daily" aria-pressed="false">Daily</button>
       <button type="button" id="tf-weekly" aria-pressed="true">Weekly</button>
       <button type="button" id="tf-monthly" aria-pressed="false">Monthly</button>
     </div>
@@ -150,7 +151,7 @@ footer{color:var(--muted);font-size:12px;margin:18px 2px 0}
   </details>
 
   <footer>
-    Prices from Yahoo Finance, split-adjusted, completed weeks and months only. Refreshed automatically after market close.
+    Prices from Yahoo Finance, split-adjusted, completed sessions, weeks and months only. Refreshed automatically after market close.
     For research and education only. Not investment advice.
   </footer>
 </div>
@@ -164,7 +165,23 @@ const fmtDate = s => new Date(s + "T00:00:00").toLocaleDateString("en-IN", { day
 
 let ALL = null, D = null, tf = "weekly", tab = "new";
 const CFG = {
+  daily: {
+    unit: "d", period: "Close of", next: "the next open", interval: "D", recent: "Past 10 sessions", hold: "250 sessions", bar: "session",
+    volLabel: "Volume vs 20-day avg", atrLabel: "Daily ATR", sort: "volx",
+    gateOff: "Market gate is off: Nifty 500 is below its 200-day average, so no daily entries are allowed.",
+    histNote: "Not enough price history to evaluate",
+    intro: "Daily Ichimoku with doubled settings (Tenkan 18 / Kijun 52 / Senkou B 104 / displacement 52) on NSE F&O stocks. A stock is a new signal on any session the eight stock conditions turn on together while the market gate is on. The plan is to buy at the next open, in up to 10 equal slots, taking the highest volume surge first.",
+    exits: [
+      ["Initial stop", "A close more than 3 × daily ATR below entry. Exit at the next open."],
+      ["Trail", "After +1 ATR of profit, 5 ATR chandelier from the highest high."],
+      ["Invalidation", "Daily close below the cloud bottom."],
+      ["Time stop", "Exit on the close of session 250."],
+      ["\"First\" tag", "First signal since price and Chikou cleared the cloud. Later signals in the same run are repeat triggers and are also traded."],
+      ["Backtest", "2008 to Nov 2026 on today's F&O list: about 19% a year (15% to 23% depending on which same-day signals fill the slots), worst drawdown 32%. The list is survivorship-biased, so treat the return as flattered."],
+    ],
+  },
   weekly: {
+    volLabel: "Volume vs 20-wk avg", atrLabel: "Weekly ATR", sort: "pass",
     unit: "wk", period: "Week ending", next: "next week's open", interval: "W", recent: "Past 8 weeks", hold: "52 weeks", bar: "week",
     histNote: "Not enough monthly history to evaluate (needs about 9 years)",
     intro: "Weekly Ichimoku (Tenkan 9 / Kijun 26 / Senkou B 52 / displacement 26) on NSE F&O stocks. A stock is a new signal on the week all nine conditions become true together. The plan is to buy at the next week's open.",
@@ -177,6 +194,8 @@ const CFG = {
     ],
   },
   monthly: {
+    volLabel: "Volume vs 12-mo avg", atrLabel: "Monthly ATR", sort: "pass",
+    gateOff: "Market gate is off: Nifty 500 closed the month below its 10-month average, so no monthly entries are allowed.",
     unit: "mo", period: "Month ending", next: "next month's first open", interval: "M", recent: "Past 12 months", hold: "24 months", bar: "month",
     histNote: "Needs about 9 years of price history before the monthly cloud and Chikou can be evaluated",
     intro: "Monthly Ichimoku (Tenkan 9 / Kijun 26 / Senkou B 52 / displacement 26) on NSE F&O stocks. A stock is a new signal on the month all ten conditions become true for the first time since price and Chikou cleared the cloud. The plan is to buy at the next month's first open, in up to 8 equal slots with at most 2 per sector.",
@@ -253,8 +272,8 @@ function fillBody(body, s) {
   stat("Cloud thickness", s.thick == null ? "–" : s.thick.toFixed(2) + " ATR");
   stat("Bullish cloud age", s.age + " " + CFG[tf].unit);
   stat("Close vs cloud top", s.brk == null ? "–" : (s.brk > 0 ? "+" : "") + s.brk.toFixed(2) + " ATR");
-  stat(tf === "weekly" ? "Volume vs 20-wk avg" : "Volume vs 12-mo avg", s.volx == null ? "–" : s.volx.toFixed(2) + "×");
-  stat(tf === "weekly" ? "Weekly ATR" : "Monthly ATR", inr(s.atr));
+  stat(CFG[tf].volLabel, s.volx == null ? "–" : s.volx.toFixed(2) + "×");
+  stat(CFG[tf].atrLabel, inr(s.atr));
   stat("Cloud top", inr(s.top));
   stat("Cloud bottom", inr(s.bot));
   stat("Indicative stop", s.stop == null ? "–" : inr(s.stop) + " (" + pct(s.stopPct) + ")");
@@ -315,12 +334,13 @@ function render() {
 function setTf(next) {
   if (!ALL[next]) return;
   tf = next; D = ALL[tf];
-  for (const k of ["weekly", "monthly"]) $("#tf-" + k).setAttribute("aria-pressed", String(k === tf));
+  for (const k of ["daily", "weekly", "monthly"]) $("#tf-" + k).setAttribute("aria-pressed", String(k === tf));
   const meta = $("#meta"); meta.textContent = "";
   meta.append(CFG[tf].period + " ", el("b", null, fmtDate(D.periodEnding)), " · " + D.universe + " NSE F&O stocks · updated " + ALL.generated);
   const banner = $("#banner");
-  banner.hidden = !(tf === "monthly" && D.marketOk === false);
-  banner.textContent = "Market gate is off: Nifty 500 closed the month below its 10-month average, so no monthly entries are allowed.";
+  banner.hidden = !(CFG[tf].gateOff && D.marketOk === false);
+  banner.textContent = CFG[tf].gateOff || "";
+  $("#sort").value = CFG[tf].sort;
   $("#rulesIntro").textContent = CFG[tf].intro;
   const fill = (id, rows) => { const t = $(id); t.textContent = ""; for (const [a, b] of rows) { const tr = el("tr"); tr.append(el("td", null, a), el("td", null, b)); t.append(tr); } };
   fill("#rulesTable", D.conditions.map(c => [c.label, c.desc]));
@@ -339,12 +359,13 @@ async function init() {
     $("#meta").textContent = "Could not load scan data. Pull down to refresh, or try again in a minute.";
     return;
   }
-  if (!ALL.monthly) $("#tf-monthly").disabled = true;
+  for (const k of ["daily", "monthly"]) if (!ALL[k]) $("#tf-" + k).disabled = true;
   let saved = "weekly";
   try { saved = localStorage.getItem("tf") || "weekly"; } catch (e) {}
   setTf(ALL[saved] ? saved : "weekly");
   $("#tf-weekly").onclick = () => setTf("weekly");
   $("#tf-monthly").onclick = () => setTf("monthly");
+  $("#tf-daily").onclick = () => setTf("daily");
   $("#q").addEventListener("input", render);
   $("#sort").addEventListener("change", render);
 }
